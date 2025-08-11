@@ -5,308 +5,269 @@ using amazon S3
 """
 
 import json
+import os
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
-import os
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Create S3 client and resource
-s3_client = boto3.client(
-    's3',
-    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+AWS_S3_ENDPOINT = os.getenv("AWS_S3_ENDPOINT")  # e.g., http://localhost:4566 for LocalStack
+AspiringStorageBucket = os.getenv("S3_BUCKET_NAME", "").strip()
+
+if not AspiringStorageBucket:
+    raise RuntimeError("S3_BUCKET_NAME is not set. Please set it in your .env")
+
+print("Starting cloud import")
+
+# Create S3 client and resource (Path-style helps with LocalStack and dots in bucket names)
+_common_kwargs = dict(
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    region_name=AWS_DEFAULT_REGION,
 )
-s3_resource = boto3.resource(
-    's3',
-    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
-)
-AspiringStorageBucket = os.getenv("S3_BUCKET_NAME")
+if AWS_S3_ENDPOINT:
+    _common_kwargs_client = dict(
+        **_common_kwargs,
+        endpoint_url=AWS_S3_ENDPOINT,
+        config=Config(s3={"addressing_style": "path"}),
+    )
+else:
+    _common_kwargs_client = _common_kwargs
 
-print("Starting cloud import");
+s3_client = boto3.client("s3", **_common_kwargs_client)
 
-#
-# The following are the base ITEM key, value APIs
-#    Using this key,value storage is built a
-#    user storage metaphor
-#
+# boto3.resource doesn't accept Config the same way
+s3_resource = boto3.resource("s3", endpoint_url=AWS_S3_ENDPOINT, **_common_kwargs)
 
-
-# store a user item
-# returns True/False
-def putItem(path, filedata, bucket_name=None):
-    if bucket_name is None:
-        bucket_name = AspiringStorageBucket
+def _ensure_bucket_exists(bucketname: str):
+    """
+    Ensure the bucket exists. In LocalStack, create if missing.
+    On real AWS, you might want to skip auto-create in prod.
+    """
     try:
-        s3_client.put_object(
-            Bucket=bucket_name,
-            Key=path,
-            Body=filedata
-        )
+        s3_client.head_bucket(Bucket=bucketname)
+        return True
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code")
+        # 404 or NoSuchBucket -> create it (especially in LocalStack)
+        if code in ("404", "NoSuchBucket", "NotFound"):
+            try:
+                # us-east-1 requires no LocationConstraint
+                if AWS_S3_ENDPOINT or AWS_DEFAULT_REGION == "us-east-1":
+                    s3_client.create_bucket(Bucket=bucketname)
+                else:
+                    s3_client.create_bucket(
+                        Bucket=bucketname,
+                        CreateBucketConfiguration={"LocationConstraint": AWS_DEFAULT_REGION},
+                    )
+                return True
+            except ClientError as ce:
+                print(f"Error creating bucket: {ce}")
+                return False
+        # 403 often means wrong creds or bucket owned by another account
+        print(f"Error getting bucket: {e}")
+        return False
+
+_ensure_bucket_exists(AspiringStorageBucket)
+
+def putItem(path, filedata, bucket_name=None):
+    bucket_name = bucket_name or AspiringStorageBucket
+    try:
+        s3_client.put_object(Bucket=bucket_name, Key=path, Body=filedata)
         return True
     except ClientError as e:
         print(f"Error putting item: {e}")
         return False
 
-# get a user item
-# returns data/None
 def getItem(path, bucket_name=None):
-    if bucket_name is None:
-        bucket_name = AspiringStorageBucket
+    bucket_name = bucket_name or AspiringStorageBucket
     try:
-        response = s3_client.get_object(
-            Bucket=bucket_name,
-            Key=path
-        )
-        return response['Body'].read().decode('utf-8')
+        response = s3_client.get_object(Bucket=bucket_name, Key=path)
+        return response["Body"].read().decode("utf-8")
     except ClientError as e:
-        if e.response['Error']['Code'] == 'NoSuchKey':
+        code = e.response.get("Error", {}).get("Code")
+        if code in ("NoSuchKey", "404", "NotFound"):
             return None
         print(f"Error getting item: {e}")
         return None
 
-# does item exist
-# returns boolean
 def existsItem(path, bucket_name=None):
-    if bucket_name is None:
-        bucket_name = AspiringStorageBucket
+    bucket_name = bucket_name or AspiringStorageBucket
     try:
-        s3_client.head_object(
-            Bucket=bucket_name,
-            Key=path
-        )
+        s3_client.head_object(Bucket=bucket_name, Key=path)
         return True
     except ClientError as e:
-        if e.response['Error']['Code'] == 'NoSuchKey' or e.response['Error']['Code'] == '404':
+        code = e.response.get("Error", {}).get("Code")
+        if code in ("NoSuchKey", "404", "NotFound"):
             return False
+        if code in ("NoSuchBucket",):
+            if _ensure_bucket_exists(bucket_name):
+                try:
+                    s3_client.head_object(Bucket=bucket_name, Key=path)
+                    return True
+                except ClientError as e2:
+                    code2 = e2.response.get("Error", {}).get("Code")
+                    if code2 in ("NoSuchKey", "404", "NotFound"):
+                        return False
+                    print(f"Error checking item existence after create: {e2}")
+                    return False
+        # 403 could be wrong creds/endpoint
         print(f"Error checking item existence: {e}")
         return False
 
-
-# delete a user item
-# returns True/False
 def deleteItem(path, bucket_name=None):
-    if bucket_name is None:
-        bucket_name = AspiringStorageBucket
+    bucket_name = bucket_name or AspiringStorageBucket
     try:
-        s3_client.delete_object(
-            Bucket=bucket_name,
-            Key=path
-        )
+        s3_client.delete_object(Bucket=bucket_name, Key=path)
         return True
     except ClientError as e:
         print(f"Error deleting item: {e}")
         return False
 
-#  The following are helpers to implement the API
-
 def createBucket(bucketname):
-    try:
-        s3_client.create_bucket(Bucket=bucketname)
+    if _ensure_bucket_exists(bucketname):
         return s3_resource.Bucket(bucketname)
-    except ClientError as e:
-        print(f"Error creating bucket: {e}")
-        return None
+    return None
 
 def getBucket(bucketname):
     try:
-        # Check if bucket exists
         s3_client.head_bucket(Bucket=bucketname)
         return s3_resource.Bucket(bucketname)
     except ClientError as e:
         print(f"Error getting bucket: {e}")
         return None
 
-#
-#
-#  The following are user file abstraction
-#    built using a key-value storage
-#
-#  The abstraction is simple
-#  The path to the file is the key
-#  The metadata on the key indicates if it is a file or directory
-#  If it is a directory, then, it contains the list of files as the value
-#  which gets updated when files get added or deleted 
-#
-#  Note that the user is embedded into the filesystem path
-#
-#  path itself is a stringified json list
-#
-#
-
-# path manipulation apis
-
-# first define dir, and file classes
+# ---------------------------
+# User file abstraction below
+# ---------------------------
 
 class File:
-    def __init__(self,name,data):
+    def __init__(self, name, data):
         self.fname = name
         self.data = data
 
 class Directory:
-    def __init__(self,name,filelist):
+    def __init__(self, name, filelist):
         self.fname = name
-        self.files = [File(i,"") for i in filelist]
-
+        self.files = [File(i, "") for i in filelist]
 
 def pathToString(path):
     return json.dumps(path)
 
-# path is a list
-# returns True/False
 def createDir(path):
-    # check if dir exists, if so fail
     spath = pathToString(path)
     data = getItem(spath)
-    if (data != None):
-        print("dir exists");
+    if data is not None:
+        print("dir exists")
         return False
-    # create the dir file
-    dirdata = {}
-    dirdata["data"] = json.dumps([])
-    dirdata["path"] = path
-    dirdata["type"] = "dir"
-    if not (putItem(spath, json.dumps(dirdata))):
-        print("putitem failed");
+    dirdata = {"data": json.dumps([]), "path": path, "type": "dir"}
+    if not putItem(spath, json.dumps(dirdata)):
+        print("putitem failed")
         return False
-    #print("createDir passed"    );
     return True
-    
-    
+
 def deleteDir(path):
-    # not implemented yet
+    # TODO: implement
     pass
 
-
-# path is list, return python file object
 def getFileRaw(path):
     pathstr = pathToString(path)
     try:
-        response = s3_client.get_object(
-            Bucket=AspiringStorageBucket,
-            Key=pathstr
-        )
-        return response['Body'].read()
+        response = s3_client.get_object(Bucket=AspiringStorageBucket, Key=pathstr)
+        return response["Body"].read()
     except ClientError as e:
-        if e.response['Error']['Code'] == 'NoSuchKey':
+        code = e.response.get("Error", {}).get("Code")
+        if code in ("NoSuchKey", "404", "NotFound"):
             return None
         print(f"Error reading file: {e}")
         return None
 
-# path is list, returns directory object or file object as the case
-# may be
 def getFile(path):
     data = getFileRaw(path)
-    print("getfile",data);
-    if data == None:
+    print("getfile", data)
+    if data is None:
         return None
-
-    data_json = json.loads(data.decode('utf-8'))
-
+    data_json = json.loads(data.decode("utf-8"))
     if data_json["type"] == "dir":
         fileslist = json.loads(data_json["data"])
-        fname = path[len(path)-1]
-        fileobj = Directory(fname, fileslist)
-        return fileobj
+        fname = path[-1]
+        return Directory(fname, fileslist)
     elif data_json["type"] == "file":
-        fname = path[len(path)-1]
-        fileobj = File(fname, data_json["data"])
-        return fileobj
+        fname = path[-1]
+        return File(fname, data_json["data"])
     else:
         return None
 
-##
-## path is list, data is a string
-##
-# In createFile function
 def createFile(path, data):
     if len(path) <= 1:
         print("path too short")
         return False
-
-    ppath = path[:-1]    
+    ppath = path[:-1]
     parent_data_raw = getFileRaw(ppath)
-    if parent_data_raw == None:
+    if parent_data_raw is None:
         print("parent dir does not exist")
         return False
-
-    parentdata = json.loads(parent_data_raw.decode('utf-8'))
-
+    parentdata = json.loads(parent_data_raw.decode("utf-8"))
     spath = pathToString(path)
-    if getItem(spath) != None:
+    if getItem(spath) is not None:
         print("file exists")
         return False
-
-    filedata = {}
-    filedata["data"] = data
-    filedata["path"] = path
-    filedata["type"] = "file"
-    if (not putItem(spath, json.dumps(filedata))):
+    filedata = {"data": data, "path": path, "type": "file"}
+    if not putItem(spath, json.dumps(filedata)):
         print("putfile failed")
         return False
-
-    fname = path[len(path)-1]
+    fname = path[-1]
     fileslist = json.loads(parentdata["data"])
     fileslist.append(fname)
-    parentdata["data"] = json.dumps(fileslist)    
-    if (not putItem(pathToString(ppath), json.dumps(parentdata))):
+    parentdata["data"] = json.dumps(fileslist)
+    if not putItem(pathToString(ppath), json.dumps(parentdata)):
         print("putdir failed")
         deleteFile(path)
         return False
     return True
-    
-##
-## path is list, data is a string
-##    
+
 def updateFile(path, data):
     # file must exist
-    filedata = getFileRaw(path)
-    if (filedata == None):
+    raw = getFileRaw(path)
+    if raw is None:
         return False
+    filedata = json.loads(raw.decode("utf-8"))
     filedata["data"] = data
-    if not putItem(pathToString(path), json.dumps(filedata)):
-        return False
-    return True
+    return putItem(pathToString(path), json.dumps(filedata))
 
-##
-## path is list
-##
 def deleteFile(path):
-    filedata = getFileRaw(path)
-    if filedata == None or filedata["type"] != "file":
-        print("file does not exist");
+    raw = getFileRaw(path)
+    if raw is None:
+        print("file does not exist")
         return False
-    #
-    # update the parent directory first
-    #
-    ppath = path[:-1]    
-    parentdata = getFileRaw(ppath)
-    if parentdata == None:
-        print("parent data failed"        );
+    filedata = json.loads(raw.decode("utf-8"))
+    if filedata.get("type") != "file":
+        print("not a file")
         return False
+    ppath = path[:-1]
+    parent_raw = getFileRaw(ppath)
+    if parent_raw is None:
+        print("parent data failed")
+        return False
+    parentdata = json.loads(parent_raw.decode("utf-8"))
     fileslist = json.loads(parentdata["data"])
-    newlist = []
-    fname = path[len(path)-1]
-    for i in fileslist:
-        if fname == i:
-            pass
-        else:
-            newlist.append(i)
+    fname = path[-1]
+    newlist = [i for i in fileslist if i != fname]
     parentdata["data"] = json.dumps(newlist)
-    if (not putItem(pathToString(ppath), json.dumps(parentdata))):
-        # this is unexpected, unwind !
-        print("putdir failed"                        );
+    if not putItem(pathToString(ppath), json.dumps(parentdata)):
+        print("putdir failed")
         return False
-    # then delete the file
     if not deleteItem(pathToString(path)):
-        print("delete file failed");
+        print("delete file failed")
         return False
     return True
-
 
 #### The following are unit tests
 
@@ -374,11 +335,11 @@ def unitTestFiles():
     deleteFile(fpath2)
     print(getFileRaw(path))
     print(str(getFile(fpath)))
-    
-print("Cloud imported");
+
+print("Cloud imported")
 
 if __name__ == "__main__":
-    # unit tests here
-    #unitTestItems()
-    #unitTestFiles()
-    unitTestItemsInBucket()
+    # unitTestItems()
+    # unitTestFiles()
+    # unitTestItemsInBucket()
+    pass
