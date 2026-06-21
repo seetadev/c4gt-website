@@ -1,4 +1,4 @@
-# Flask Application README
+# SocialCalc with Flask Backend
 
 ## Prerequisites
 Before running this Flask application, ensure you have the following installed on your system:
