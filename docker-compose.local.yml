@@ -1,0 +1,67 @@
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: c4gt-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: c4gt-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/c4gt-dev-bucket &&
+      echo 'Bucket created.'
+      "
+    networks:
+      - app-network
+
+  app:
+    build: .
+    container_name: c4gt-website
+    restart: unless-stopped
+    env_file:
+      - .env.local
+    environment:
+      FLASK_APP: main.py
+      FLASK_ENV: development
+    command: flask run --host=0.0.0.0 --port=5000
+    ports:
+      - "5000:5000"
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  minio_data:

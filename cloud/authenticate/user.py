@@ -12,9 +12,9 @@ userdir = "users"
 userdirpath = ["home",userdir]
 
 def _init_user_directory():
-    if not storage.existsItem('/'.join(userdirpath)):
-        storage.createDir('/'.join(userdirpath))
-        print(f"Created user directory: {'/'.join(userdirpath)}")
+    if storage.getFile(userdirpath) is None:
+        storage.createDir(userdirpath)
+        print(f"Created user directory: {userdirpath}")
 
 _init_user_directory()
 
