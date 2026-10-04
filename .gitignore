@@ -137,3 +137,7 @@ dmypy.json
 cython_debug/
 
 *.pem
+
+# Runtime scratch files written by the import/export handlers
+excelinterop/tmp/*
+!excelinterop/tmp/.gitkeep
