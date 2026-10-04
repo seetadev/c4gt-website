@@ -153,4 +153,4 @@ def import_html_post():
     return HtmlToPdfHandler().post()
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=os.getenv('FLASK_DEBUG', 'false').lower() in ('1', 'true', 'yes'))

@@ -191,7 +191,6 @@ def getFileRaw(path):
 
 def getFile(path):
     data = getFileRaw(path)
-    print("getfile", data)
     if data is None:
         return None
     data_json = json.loads(data.decode("utf-8"))
