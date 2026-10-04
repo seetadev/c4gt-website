@@ -2,6 +2,7 @@ from flask import  request, Response
 import codecs
 import subprocess
 import logging
+import os
 
 def capitalize_first_letter(word):
     if len(word) > 0:
@@ -66,9 +67,14 @@ class DownloadFileHander:
             outfile = fullfname + "." + suffix.get(type, "pdf")
             logging.info(outfile)
             logging.info(inpfile)
+            if os.path.exists(outfile):
+                os.remove(outfile)  # never serve a stale PDF if conversion fails
             cmdname = "wkhtmltopdf"
-            output = subprocess.getoutput(f"{cmdname} {inpfile} {outfile}")
+            status, output = subprocess.getstatusoutput(f"{cmdname} {inpfile} {outfile}")
             logging.info(output)
+            if not os.path.exists(outfile):
+                reason = "wkhtmltopdf not installed" if status == 127 else "wkhtmltopdf failed"
+                return Response(f"{reason}: PDF export unavailable", status=501, mimetype="text/plain")
 
             with open(outfile, 'rb') as f:
                 content = f.read()

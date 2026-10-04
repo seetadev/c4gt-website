@@ -27,7 +27,10 @@ class HtmlToPdfHandler:
         logging.info("in htmltopdf converter get")
         fname = request.args.get('fname')
         action = request.args.get('action', default=None)
-        
+
+        if not fname:
+            return "fname is required", 400
+
         if action == "preview":
             fullfname = os.path.join(self.preview_path, fname)
             inpfile = fullfname + ".pdf"
@@ -95,6 +98,8 @@ class HtmlToPdfHandler:
         logging.info(inpfile)
         cmdname = "wkhtmltopdf"
         subprocess_output = subprocess.getoutput(f"{cmdname} {inpfile} {outfile}")
+        if not os.path.exists(outfile):
+            return jsonify(result="error", message="wkhtmltopdf not installed or failed: PDF unavailable"), 501
 
         pdfurl = f"http://{request.host}/htmltopdf?fname={fname}&action={action}" if action else f"http://{request.host}/htmltopdf?fname={fname}"
         return jsonify(pdfurl=pdfurl, result="ok")
