@@ -1,24 +1,42 @@
+# Self-contained local stack: Flask app + MinIO (S3) + one-shot bucket creation.
+# MinIO's own images are no longer pullable anonymously; this pinned Bitnami image bundles minio and mc.
+# Usage: cp .env.local.example .env.local && docker compose -f docker-compose.local.yml up --build
+# Credentials and bucket come from .env.local (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME).
 services:
-  db:
-    image: mysql:8.0
-    container_name: c4gt-mysql
+  minio:
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+    container_name: c4gt-minio
     restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: c4gt_root_pass
-      MYSQL_DATABASE: c4gt_db
-      MYSQL_USER: c4gt_user
-      MYSQL_PASSWORD: c4gt_local_pass
+    env_file:
+      - .env.local
+    entrypoint:
+      - /bin/sh
+      - -c
+      - MINIO_ROOT_USER="$$AWS_ACCESS_KEY_ID" MINIO_ROOT_PASSWORD="$$AWS_SECRET_ACCESS_KEY" exec minio server /bitnami/minio/data --console-address ":9001"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - minio_data:/bitnami/minio/data
     ports:
-      - "3306:3306"
-    networks:
-      - app-network
+      - "${MINIO_PORT:-9100}:9000"
+      - "${MINIO_CONSOLE_PORT:-9101}:9001"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pc4gt_root_pass"]
-      interval: 10s
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
       timeout: 5s
       retries: 10
+
+  createbuckets:
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+    container_name: c4gt-createbuckets
+    restart: "no"
+    env_file:
+      - .env.local
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - mc alias set local http://minio:9000 "$$AWS_ACCESS_KEY_ID" "$$AWS_SECRET_ACCESS_KEY" && mc mb --ignore-existing "local/$$S3_BUCKET_NAME"
 
   app:
     build: .
@@ -28,24 +46,17 @@ services:
       - .env.local
     environment:
       FLASK_APP: main.py
-      FLASK_ENV: development
     command: flask run --host=0.0.0.0 --port=5000
     ports:
       - "5000:5000"
     depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - app-network
+      createbuckets:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/login"]
       interval: 30s
       timeout: 10s
       retries: 5
 
-networks:
-  app-network:
-    driver: bridge
-
 volumes:
-  mysql_data:
+  minio_data:
