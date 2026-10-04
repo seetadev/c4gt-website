@@ -15,7 +15,6 @@ class UserLoginHandler:
         user = request.form.get('email')
         password = request.form.get('password')
         logging.info(user)
-        logging.info(password)
         if cloud.authenticate.user.authenticate_user(user, password):
             logging.info("authenticate succeeded")
             response = redirect('/save')

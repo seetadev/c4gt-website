@@ -1,4 +1,4 @@
-from flask import request, render_template, make_response
+from flask import request, render_template, make_response, redirect
 import logging
 import string
 import random
@@ -20,20 +20,8 @@ class MessageMixin:
 class ImportHandler:
     @staticmethod
     def get():
-        session = get_random_string(6)
-        logging.info(f"session is {session}")
-        
-        resp = make_response(render_template('importcollab.html', entry={
-            'fname': 'test',
-            'sheetstr': '',
-            'sheetmscestr': '',
-            'session': session
-        }))
-        resp.set_cookie('session', session)
-        resp.set_cookie('idinsession', '1')
-        
-        channels[session] = MessageMixin(session, "", "")
-        return resp
+        # The import form lives in the editor's Import tab (open a sheet from /save)
+        return redirect('/save')
 
     def post():
         session = request.cookies.get('session')

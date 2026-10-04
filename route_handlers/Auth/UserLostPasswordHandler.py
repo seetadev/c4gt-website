@@ -1,5 +1,6 @@
 from flask import render_template, request, make_response
 import logging
+import os
 import cloud
 import string
 import random
@@ -32,15 +33,16 @@ class UserLostPasswordHandler:
         cloud.authenticate.user.set_user_dongle(user, dongle)
         link = UserLostPasswordHandler.get_lost_pw_link(user, dongle)
         msg = f"Please click the following link to reset password for user {user}\n{link}"
-        logging.info(msg)
+        logging.info(f"password reset requested for {user}")
 
         message = EmailMessage()
         message['Subject'] = 'Reset Password'
         message.set_content(msg)
 
         # TODO : Replace with your email sending code (e.g., Flask-Mail or other)
-        # Example using print to simulate sending
-        print(f"Email sent to {user}: {msg}")
+        # Dev stand-in for sending: only show the link (with its token) when FLASK_DEBUG is on
+        if os.getenv('FLASK_DEBUG', 'false').lower() in ('1', 'true', 'yes'):
+            print(f"Email sent to {user}: {msg}")
 
     @staticmethod
     def get_random_string(size):

@@ -20,6 +20,10 @@ from route_handlers.HTMLToPDFHandler import HtmlToPdfHandler
 # Load environment variables from .env file
 load_dotenv()
 
+# Runtime directories used by the import/export handlers (paths are relative to the repo root)
+for _d in ("excelinterop/tmp", "excelinterop/tmp/tmp/preview"):
+    os.makedirs(_d, exist_ok=True)
+
 app = Flask(__name__, template_folder='templates')
 app.secret_key = os.getenv('SECRET_KEY')
 
@@ -142,11 +146,11 @@ def import_post():
 
 @app.route('/htmltopdf', methods=['GET'])
 def import_html_get():
-    return HtmlToPdfHandler.get()
+    return HtmlToPdfHandler().get()
 
 @app.route('/htmltopdf', methods=['POST'])
 def import_html_post():
-    return HtmlToPdfHandler.post()
+    return HtmlToPdfHandler().post()
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=os.getenv('FLASK_DEBUG', 'false').lower() in ('1', 'true', 'yes'))

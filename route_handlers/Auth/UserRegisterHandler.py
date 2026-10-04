@@ -15,7 +15,6 @@ class UserRegisterHandler:
         user = request.form.get('email')
         password = request.form.get('password')
         logging.info(user)
-        logging.info(password)
         if user_exists(user):
             # User already exists
             return render_template("userregister-exists.html", user=None, reguser=user)

@@ -23,7 +23,6 @@ class PWResetHandler:
         user = request.form.get('email')
         password = request.form.get('password')
         logging.info(user)
-        logging.info(password)
         
         # Verify if user exists
         if not cloud.authenticate.user.user_exists(user):

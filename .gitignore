@@ -104,6 +104,8 @@ celerybeat.pid
 # Environments
 .env
 .env.*
+!.env.local.example
+!.env.example
 .venv
 venv/
 ENV/
@@ -135,3 +137,7 @@ dmypy.json
 cython_debug/
 
 *.pem
+
+# Runtime scratch files written by the import/export handlers
+excelinterop/tmp/*
+!excelinterop/tmp/.gitkeep
