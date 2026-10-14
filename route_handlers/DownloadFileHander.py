@@ -1,6 +1,6 @@
 from flask import  request, Response
 import codecs
-import subprocess
+from route_handlers.safe_exec import run_command
 import logging
 import os
 
@@ -50,7 +50,7 @@ class DownloadFileHander:
             logging.info(inpfile)
             cmdname = "excelinterop/export.php"
             writer = capitalize_first_letter(suffix.get(type, "txt"))
-            output = subprocess.getoutput(f"php {cmdname} {inpfile} {outfile} {writer}")
+            status, output = run_command(["php", cmdname, inpfile, outfile, writer])
             logging.info(output)
 
             with open(outfile, 'rb') as f:
@@ -70,7 +70,7 @@ class DownloadFileHander:
             if os.path.exists(outfile):
                 os.remove(outfile)  # never serve a stale PDF if conversion fails
             cmdname = "wkhtmltopdf"
-            status, output = subprocess.getstatusoutput(f"{cmdname} {inpfile} {outfile}")
+            status, output = run_command([cmdname, inpfile, outfile])
             logging.info(output)
             if not os.path.exists(outfile):
                 reason = "wkhtmltopdf not installed" if status == 127 else "wkhtmltopdf failed"

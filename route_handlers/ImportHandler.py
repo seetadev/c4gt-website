@@ -1,8 +1,10 @@
-from flask import request, render_template, make_response, redirect
+from flask import request, render_template, make_response, redirect, Response
 import logging
 import string
 import random
-import subprocess
+import os
+
+from route_handlers.safe_exec import is_safe_filename, run_command, server_side_name
 
 channels = {}
 sessionfileuploads = {}
@@ -27,16 +29,26 @@ class ImportHandler:
         session = request.cookies.get('session')
         upload_file = request.files['upload']
         fname = upload_file.filename
+        if not is_safe_filename(fname):
+            return Response("Invalid file name", status=400, mimetype="text/plain")
         fcontent = upload_file.read()
 
         if fname[-3:] != "msc" and fname[-4:] != "msce":
-            fullfname = f"excelinterop/tmp/{fname}"
-            with open(fullfname, 'wb') as f:
-                f.write(fcontent)
-            
-            cmdname = "excelinterop/import.php"
-            output = subprocess.getoutput(f"php {cmdname} {fullfname}")
-            i = output.index("$---$")
+            # The upload is stored under a server-generated name; the client's name is display-only.
+            fullfname = server_side_name(fname)
+            try:
+                with open(fullfname, 'wb') as f:
+                    f.write(fcontent)
+
+                cmdname = "excelinterop/import.php"
+                status, output = run_command(["php", cmdname, fullfname])
+            finally:
+                if os.path.exists(fullfname):
+                    os.remove(fullfname)
+            i = output.find("$---$")
+            if i < 0:
+                logging.info(output)
+                return Response("Unable to import this file", status=422, mimetype="text/plain")
             wbook = output[i + 5:]
         else:
             wbook = fcontent.decode('utf-8')
