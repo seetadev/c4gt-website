@@ -3,7 +3,11 @@
 #   Model of a user
 #
 #
+import hashlib
+import hmac
 import json
+import secrets
+import time
 from passlib.hash import sha256_crypt
 from cloud.storage import storage
 
@@ -131,6 +135,55 @@ def set_user_dongle(user, dongle):
         return
     userobj.set_dongle(dongle)
     set_user(userobj)
+
+
+# Password-reset tokens. The user record stores only "sha256(token):expiry",
+# so the token itself exists only in the link sent to the user.
+RESET_TOKEN_TTL_SECONDS = 60 * 60
+
+def _hash_token(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+def _token_matches(stored, token):
+    if not stored or not token or ":" not in stored:
+        return False
+    stored_hash, _, expiry = stored.partition(":")
+    try:
+        if int(expiry) <= time.time():
+            return False
+    except ValueError:
+        return False
+    return hmac.compare_digest(stored_hash, _hash_token(token))
+
+def issue_reset_token(user):
+    """Create a random, expiring reset token for the user and return it (None if no such user)."""
+    userobj = get_user(user)
+    if userobj == None:
+        return None
+    token = secrets.token_urlsafe(32)
+    expiry = int(time.time()) + RESET_TOKEN_TTL_SECONDS
+    userobj.set_dongle(f"{_hash_token(token)}:{expiry}")
+    set_user(userobj)
+    return token
+
+def verify_reset_token(user, token):
+    """True if token is the current, unexpired reset token issued to this user."""
+    userobj = get_user(user)
+    if userobj == None:
+        return False
+    return _token_matches(userobj.get_dongle(), token)
+
+def reset_password_with_token(user, token, newpassword):
+    """Set a new password only if the token is valid; the token is consumed by the same write."""
+    userobj = get_user(user)
+    if userobj == None or not newpassword:
+        return False
+    if not _token_matches(userobj.get_dongle(), token):
+        return False
+    userobj.set_password(newpassword)
+    userobj.set_dongle("")
+    set_user(userobj)
+    return True
 
 
 

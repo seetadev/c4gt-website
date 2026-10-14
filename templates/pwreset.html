@@ -3,7 +3,8 @@
   <center>
     Reset password for: {{ reguser }}
     <br />
-    <input type="hidden" name="email" value="{{ reguser }}" /><br />
+    <input type="hidden" name="email" value="{{ reguser }}" />
+    <input type="hidden" name="token" value="{{ token }}" /><br />
     Password:<input type="password" name="password" size="15" /><br />
     Retype Password:<input type="password" name="repassword" size="15" /><br />
     <br />
