@@ -29,9 +29,8 @@ class UserLostPasswordHandler:
 
     @staticmethod
     def send_lost_pw_email(user):
-        dongle = UserLostPasswordHandler.get_random_string(20)
-        cloud.authenticate.user.set_user_dongle(user, dongle)
-        link = UserLostPasswordHandler.get_lost_pw_link(user, dongle)
+        token = cloud.authenticate.user.issue_reset_token(user)
+        link = UserLostPasswordHandler.get_lost_pw_link(user, token)
         msg = f"Please click the following link to reset password for user {user}\n{link}"
         logging.info(f"password reset requested for {user}")
 
