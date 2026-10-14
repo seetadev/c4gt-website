@@ -5,7 +5,7 @@ import random
 import string
 import json
 import time
-import subprocess
+from route_handlers.safe_exec import run_command
 from cloud.storage.storage import existsItem,getItem
 
 class HtmlToPdfHandler:
@@ -97,7 +97,7 @@ class HtmlToPdfHandler:
         logging.info(outfile)
         logging.info(inpfile)
         cmdname = "wkhtmltopdf"
-        subprocess_output = subprocess.getoutput(f"{cmdname} {inpfile} {outfile}")
+        subprocess_output = run_command([cmdname, inpfile, outfile])[1]
         if not os.path.exists(outfile):
             return jsonify(result="error", message="wkhtmltopdf not installed or failed: PDF unavailable"), 501
 
